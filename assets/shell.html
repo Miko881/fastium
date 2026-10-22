@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="pl">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https: http:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <title>Fastium</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font: 14px 'Segoe UI', system-ui, sans-serif;
+      background: #0e1116;
+      color: #e4e9ee;
+      --accent: #9fe8c3;
+      --muted: #8b96a5;
+      --line: #272d37
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden
+    }
+
+    button,
+    input {
+      font: inherit
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+      color: inherit;
+      background: none;
+      border-radius: 7px
+    }
+
+    button:hover {
+      background: #29313b
+    }
+
+    button:disabled {
+      opacity: .3;
+      cursor: default
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px
+    }
+
+    button[aria-pressed=true] {
+      color: var(--accent);
+      background: #233b32
+    }
+
+    input {
+      color: inherit;
+      outline: 0
+    }
+
+    input::placeholder {
+      color: var(--muted)
+    }
+
+    [hidden] {
+      display: none !important
+    }
+
+    header {
+      height: 100px;
+      background: #151a22;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .tabbar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      padding: 0 0 0 10px;
+      gap: 9px;
+      -webkit-app-region: drag;
+      user-select: none
+    }
+
+    .tabbar button,
+    .tabbar input,
+    .tabbar .wordmark,
+    .tab {
+      -webkit-app-region: no-drag
+    }
+
+    .wordmark {
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: .07em;
+      padding: 0 8px;
+      color: var(--accent)
+    }
+
+    #tabs {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      flex: 1;
+      min-width: 0;
+      height: 36px
+    }
+
+    .tab {
+      display: flex;
+      align-items: center;
+      min-width: 120px;
+      max-width: 220px;
+      flex: 1;
+      border-radius: 8px;
+      background: #191f28;
+      border: 1px solid transparent
+    }
+
+    .tab.active {
+      background: #28313c;
+      border-color: #3e4c59
+    }
+
+    .tab-select {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+      text-align: left;
+      height: 32px;
+      padding: 0 10px
+    }
+
+    .tab-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px
+    }
+
+    .tab-state {
+      color: var(--accent);
+      font-size: 11px
+    }
+
+    .tab-favicon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      border-radius: 2px;
+      object-fit: contain
+    }
+
+    .tab-close {
+      width: 26px;
+      height: 26px;
+      margin-right: 3px;
+      color: var(--muted)
+    }
+
+    .icon {
+      min-width: 34px;
+      height: 34px;
+      font-size: 19px
+    }
+
+    .win-controls {
+      display: flex;
+      align-items: center;
+      height: 100%;
+      margin-left: auto;
+      -webkit-app-region: no-drag
+    }
+
+    .win-btn {
+      width: 46px;
+      height: 46px;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 0;
+      color: var(--muted);
+      font-size: 12px;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      transition: background .15s, color .15s
+    }
+
+    .win-btn:hover {
+      background: #28313c;
+      color: #fff
+    }
+
+    .win-btn.win-close:hover {
+      background: #e81123;
+      color: #fff
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      height: 54px;
+      padding: 6px 12px 10px
+    }
+
+    .address {
+      flex: 1;
+      min-width: 60px;
+      display: flex;
+      height: 36px;
+      background: #0e1219;
+      border: 1px solid #303945;
+      border-radius: 8px;
+      align-items: center
+    }
+
+    .address:focus-within {
+      border-color: var(--accent)
+    }
+
+    #scheme {
+      font-size: 10px;
+      color: var(--muted);
+      padding-left: 11px
+    }
+
+    #address {
+      background: transparent;
+      border: 0;
+      padding: 8px 10px;
+      width: 100%;
+      font-size: 13px;
+      outline: 0
+    }
+
+    .pill {
+      height: 34px;
+      padding: 0 10px;
+      font-size: 12px;
+      white-space: nowrap
+    }
+
+    main {
+      position: absolute;
+      top: 100px;
+      bottom: 28px;
+      left: 0;
+      right: 0;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(ellipse at 50% 35%, #1b2b2b 0, transparent 62%)
+    }
+
+    .hero {
+      width: min(620px, 85vw);
+      text-align: center;
+      padding: 24px 0
+    }
+
+    .eyebrow {
+      font-size: 10px;
+      letter-spacing: .25em;
+      color: var(--accent);
+      margin-bottom: 24px
+    }
+
+    .brand {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px
+    }
+
+    .mark {
+      width: 49px;
+      height: 52px;
+      position: relative;
+      transform: skew(-14deg)
+    }
+
+    .mark:before,
+    .mark:after {
+      content: '';
+      position: absolute;
+      background: var(--accent);
+      border-radius: 3px
+    }
+
+    .mark:before {
+      width: 15px;
+      height: 51px;
+      left: 4px;
+      top: 0
+    }
+
+    .mark:after {
+      width: 39px;
+      height: 13px;
+      left: 4px;
+      top: 0;
+      box-shadow: 0 20px 0 var(--accent)
+    }
+
+    h1 {
+      font-size: 54px;
+      font-weight: 650;
+      letter-spacing: -2px;
+      margin: 0
+    }
+
+    h1 span {
+      color: var(--accent)
+    }
+
+    .tagline {
+      color: #a0aab6;
+      margin: 16px 0 34px;
+      font-size: 15px
+    }
+
+    .search {
+      display: flex;
+      align-items: center;
+      background: #1a222b;
+      border: 1px solid #3c4c50;
+      border-radius: 12px;
+      padding: 8px;
+      box-shadow: 0 12px 40px #0003
+    }
+
+    .search:focus-within {
+      border-color: var(--accent)
+    }
+
+    .search-icon {
+      font-size: 23px;
+      color: var(--muted);
+      padding: 0 12px
+    }
+
+    .search input {
+      background: none;
+      border: 0;
+      outline: 0;
+      flex: 1;
+      min-width: 0;
+      padding: 12px 0
+    }
+
+    .search button {
+      background: var(--accent);
+      color: #14251e;
+      padding: 11px 18px;
+      font-weight: 600
+    }
+
+    .search button:hover {
+      background: #bef3d8
+    }
+
+    .shortcuts {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 24px
+    }
+
+    .shortcut {
+      background: #181e27;
+      border: 1px solid var(--line);
+      padding: 10px 16px;
+      font-size: 12px;
+      color: #b9c3cf
+    }
+
+    .hint {
+      margin-top: 36px;
+      font-size: 11px;
+      color: #75818f
+    }
+
+    .hint kbd {
+      border: 1px solid #3b4652;
+      border-radius: 4px;
+      padding: 2px 5px;
+      font: inherit;
+      color: #9ca9b7
+    }
+
+    #downloads {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 28px;
+      height: 220px;
+      border-top: 1px solid #38434f;
+      background: #151b23;
+      padding: 12px 18px
+    }
+
+    .download-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px
+    }
+
+    .download-title-group {
+      display: flex;
+      align-items: baseline;
+      gap: 12px
+    }
+
+    .download-heading h2 {
+      font-size: 14px;
+      margin: 0
+    }
+
+    .download-sub {
+      color: var(--muted);
+      font-size: 11px
+    }
+
+    .download-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .download-header-actions button {
+      border: 1px solid #38434f;
+      padding: 4px 10px;
+      font-size: 11px;
+      border-radius: 6px;
+      color: #cdd6df
+    }
+
+    .download-header-actions button:hover {
+      background: #232c37;
+      color: #fff
+    }
+
+    .download-header-actions #downloads-close {
+      border: 0;
+      font-size: 16px;
+      padding: 0 6px;
+      line-height: 1
+    }
+
+    #download-list {
+      overflow-y: auto;
+      height: 160px;
+      scrollbar-width: thin
+    }
+
+    .download {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) 140px 240px;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      padding: 9px 0
+    }
+
+    .filename {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 12px
+    }
+
+    .filename.clickable {
+      cursor: pointer;
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px
+    }
+
+    .download-detail {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 4px
+    }
+
+    progress {
+      width: 100%;
+      height: 5px;
+      accent-color: var(--accent)
+    }
+
+    .download-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 5px
+    }
+
+    .download-actions button {
+      border: 1px solid #3b4652;
+      padding: 5px 9px;
+      font-size: 11px;
+      border-radius: 6px
+    }
+
+    .download-actions button.btn-primary {
+      background: var(--accent);
+      color: #14251e;
+      font-weight: 600;
+      border-color: var(--accent)
+    }
+
+    .download-actions button.btn-primary:hover {
+      background: #bef3d8
+    }
+
+    #downloads-toggle.active-download {
+      color: var(--accent);
+      position: relative
+    }
+
+    #downloads-toggle.active-download::after {
+      content: '';
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--accent);
+      animation: pulse 1.6s infinite
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.9); opacity: 0.8 }
+      50% { transform: scale(1.25); opacity: 1 }
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 12px;
+      padding-top: 24px;
+      text-align: center
+    }
+
+    footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px;
+      background: #11161d;
+      border-top: 1px solid var(--line);
+      gap: 20px;
+      font-size: 10px;
+      color: var(--muted)
+    }
+
+    #notice {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    #stats {
+      white-space: nowrap
+    }
+
+    .dot {
+      color: var(--accent)
+    }
+
+    @media(max-width:800px) {
+      .wordmark {
+        display: none
+      }
+
+      .pill {
+        padding: 0 7px
+      }
+
+      .tab {
+        min-width: 100px
+      }
+
+      .download {
+        grid-template-columns: minmax(130px, 1fr) 90px 200px;
+        gap: 10px
+      }
+    }
+
+    @media(max-height:600px) {
+
+      .eyebrow,
+      .hint {
+        display: none
+      }
+
+      .tagline {
+        margin: 10px 0 20px
+      }
+
+      .hero {
+        padding: 10px 0
+      }
+
+      h1 {
+        font-size: 42px
+      }
+
+      .shortcuts {
+        margin-top: 16px
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="tabbar"><span class="wordmark">FASTIUM</span>
+      <div id="tabs" role="tablist" aria-label="Karty"></div><button class="icon" id="new" title="Nowa karta (Ctrl+T)"
+        aria-label="Nowa karta">+</button>
+      <div class="win-controls"><button class="win-btn" id="win-min" title="Minimalizuj"
+          aria-label="Minimalizuj">&#x2014;</button><button class="win-btn" id="win-max" title="Maksymalizuj"
+          aria-label="Maksymalizuj">&#x25A2;</button><button class="win-btn win-close" id="win-close" title="Zamknij"
+          aria-label="Zamknij">&#x2715;</button></div>
+    </div>
+    <nav class="nav" aria-label="Nawigacja">
+      <button class="icon" id="back" title="Wstecz" aria-label="Wstecz">‹</button>
+      <button class="icon" id="forward" title="Dalej" aria-label="Dalej">›</button>
+      <button class="icon" id="reload" title="Odśwież (Ctrl+R)" aria-label="Odśwież">↻</button>
+      <button class="icon" id="home" title="Strona startowa" aria-label="Strona startowa">⌂</button>
+      <form class="address" id="address-form"><span id="scheme" aria-hidden="true"></span><input id="address"
+          aria-label="Adres lub wyszukiwanie w Google" placeholder="Wpisz adres lub szukaj w Google" autocomplete="off"
+          spellcheck="false"></form>
+      <button class="pill" id="block" title="Włącz lub wyłącz blokowanie reklam i trackerów"
+        aria-pressed="true">Ochrona</button>
+      <button class="pill" id="awake" title="Pozostaw aktywną kartę działającą w tle (np. rozmowa lub formularz)"
+        aria-pressed="false">Nie usypiaj</button>
+      <button class="icon" id="downloads-toggle" title="Pobieranie (Ctrl+J)" aria-label="Pobieranie"
+        aria-expanded="false">↓</button>
+    </nav>
+  </header>
+  <main id="dashboard">
+    <section class="hero" aria-label="Strona startowa Fastium">
+      <div class="eyebrow">MNIEJ ZBĘDNYCH RZECZY. WIĘCEJ INTERNETU.</div>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <h1>Fastium<span>.</span></h1>
+      </div>
+      <p class="tagline">Otwórz to, co Cię interesuje.</p>
+      <form class="search" id="search-form"><span class="search-icon" aria-hidden="true">⌕</span><input id="search"
+          aria-label="Szukaj w Google" placeholder="Czego dziś szukasz?" autocomplete="off"><button type="submit">Szukaj
+          →</button></form>
+      <div class="shortcuts"><button class="shortcut" data-url="https://www.youtube.com/">YouTube ↗</button><button
+          class="shortcut" data-url="https://www.tiktok.com/">TikTok ↗</button><button class="shortcut"
+          data-url="https://github.com/">GitHub ↗</button></div>
+      <p class="hint"><kbd>Ctrl</kbd> + <kbd>L</kbd> adres &nbsp; · &nbsp; <kbd>Ctrl</kbd> + <kbd>T</kbd> nowa karta
+        &nbsp; · &nbsp; <kbd>Ctrl</kbd> + <kbd>Tab</kbd> następna</p>
+    </section>
+  </main>
+  <section id="downloads" aria-label="Pobieranie plików" hidden>
+    <div class="download-heading">
+      <div class="download-title-group">
+        <h2>Pobieranie</h2>
+        <span class="download-sub">Pliki zapisywane są w folderze Pobrane.</span>
+      </div>
+      <div class="download-header-actions">
+        <button id="downloads-open-folder" title="Otwórz folder Pobrane">Folder Pobrane</button>
+        <button id="downloads-clear" title="Wyczyść zakończone pobrania" hidden>Wyczyść</button>
+        <button id="downloads-close" aria-label="Zamknij panel pobierania">×</button>
+      </div>
+    </div>
+    <div id="download-list"></div>
+  </section>
+  <footer><span id="notice" role="status">Gotowy</span><span id="stats"><span class="dot">●</span> Fastium</span>
+  </footer>
+  <script>
+    'use strict';
+    const $ = id => document.getElementById(id);
+    const send = (action, extra = {}) => window.ipc.postMessage(JSON.stringify({ action, ...extra }));
+    let state = null, lastTabs = '', lastActive = null;
+    const tabNodes = new Map(), downloadNodes = new Map();
+    window.focusAddress = () => { $('address').focus(); $('address').select(); };
+    for (const action of ['new', 'back', 'forward', 'home', 'block', 'awake']) $(action).onclick = () => send(action);
+    for (const id of ['downloads-toggle', 'downloads-close']) $(id).onclick = () => send('downloads');
+    $('downloads-open-folder').onclick = () => send('open_downloads_folder');
+    $('downloads-clear').onclick = () => send('clear_completed');
+    $('win-min').onclick = () => send('window_minimize');
+    $('win-max').onclick = () => send('window_maximize');
+    $('win-close').onclick = () => send('window_close');
+    $('reload').onclick = () => send(state?.tabs.find(t => t.id === state.active)?.loading ? 'stop' : 'reload');
+    $('address-form').onsubmit = e => { e.preventDefault(); send('navigate', { text: $('address').value }); $('address').blur(); };
+    $('search-form').onsubmit = e => { e.preventDefault(); const q = $('search').value.trim(); if (q) send('navigate', { text: 'https://www.google.com/search?q=' + encodeURIComponent(q) }); };
+    for (const button of document.querySelectorAll('[data-url]')) button.onclick = () => send('navigate', { text: button.dataset.url });
+    $('address').onkeydown = e => { if (e.key === 'Escape') { const tab = state?.tabs.find(t => t.id === state.active); $('address').value = tab?.home ? '' : (tab?.url || ''); $('address').blur(); } };
+    const bytes = n => { if (!Number.isFinite(n) || n < 0) return '?'; if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'; return (n / 1048576).toFixed(1) + ' MB'; };
+    function formatTime(sec) {
+      if (!Number.isFinite(sec) || sec <= 0) return '';
+      if (sec < 60) return Math.ceil(sec) + ' s';
+      const m = Math.floor(sec / 60);
+      const s = Math.ceil(sec % 60);
+      if (m < 60) return `${m} min ${s > 0 ? s + ' s' : ''}`;
+      const h = Math.floor(m / 60);
+      return `${h} godz. ${m % 60} min`;
+    }
+    function renderTabs(s) {
+      const signature = JSON.stringify([s.tabs, s.active]);
+      if (signature === lastTabs) return;
+      lastTabs = signature;
+      const ids = new Set(s.tabs.map(t => t.id));
+      for (const [id, node] of tabNodes) if (!ids.has(id)) { node.remove(); tabNodes.delete(id); }
+      for (const tab of s.tabs) {
+        let node = tabNodes.get(tab.id);
+        if (!node) {
+          node = document.createElement('div'); node.className = 'tab';
+          const select = document.createElement('button'); select.className = 'tab-select'; select.setAttribute('role', 'tab');
+          const icon = document.createElement('span'); icon.className = 'tab-state'; icon.setAttribute('aria-hidden', 'true');
+          const img = document.createElement('img'); img.className = 'tab-favicon'; img.alt = ''; img.hidden = true;
+          img.onerror = () => { img.hidden = true; icon.hidden = false; };
+          const title = document.createElement('span'); title.className = 'tab-title';
+          select.append(icon, img, title); select.onclick = () => send('switch', { id: tab.id });
+          const close = document.createElement('button'); close.className = 'tab-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Zamknij kartę'); close.onclick = () => send('close', { id: tab.id });
+          node.append(select, close); $('tabs').append(node); tabNodes.set(tab.id, node);
+        }
+        node.classList.toggle('active', tab.id === s.active);
+        node.children[0].setAttribute('aria-selected', String(tab.id === s.active));
+        node.children[0].title = tab.title + '\n' + tab.url;
+        node.querySelector('.tab-title').textContent = tab.title || tab.url;
+        const icon = node.querySelector('.tab-state');
+        const img = node.querySelector('.tab-favicon');
+        if (tab.favicon && !tab.home && !tab.loading && !tab.sleeping) {
+          if (img.src !== tab.favicon) img.src = tab.favicon;
+          img.hidden = false;
+          icon.hidden = true;
+        } else {
+          img.hidden = true;
+          icon.hidden = false;
+          icon.textContent = tab.sleeping ? 'z' : tab.loading ? '◌' : tab.home ? 'F' : '·';
+        }
+      }
+      if (lastActive !== s.active) tabNodes.get(s.active)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    function renderDownloads(items) {
+      const ids = new Set(items.map(d => d.id));
+      for (const [id, node] of downloadNodes) if (!ids.has(id)) { node.remove(); downloadNodes.delete(id); }
+      let empty = $('download-empty');
+      if (!items.length && !empty) { empty = document.createElement('div'); empty.id = 'download-empty'; empty.className = 'empty'; empty.textContent = 'Pobrane pliki pojawią się tutaj.'; $('download-list').append(empty); }
+      if (items.length) empty?.remove();
+      for (const d of items) {
+        let node = downloadNodes.get(d.id);
+        if (!node) {
+          node = document.createElement('article'); node.className = 'download';
+          const info = document.createElement('div'), name = document.createElement('div'), detail = document.createElement('div');
+          name.className = 'filename'; detail.className = 'download-detail'; info.append(name, detail);
+          const progress = document.createElement('progress'); progress.setAttribute('aria-label', 'Postęp pobierania'); progress.max = 100;
+          const actions = document.createElement('div'); actions.className = 'download-actions';
+          for (const [action, label, cls, title] of [
+            ['open_file', 'Otwórz', 'btn-primary', 'Otwórz pobrany plik'],
+            ['show_folder', 'W folderze', '', 'Pokaż plik w folderze pobranych'],
+            ['pause', 'Pauza', '', 'Wstrzymaj pobieranie'],
+            ['resume', 'Wznów', '', 'Wznów pobieranie'],
+            ['cancel', 'Anuluj', '', 'Anuluj pobieranie'],
+            ['clear_download', 'Usuń', '', 'Usuń plik i przenieś do Kosza']
+          ]) {
+            const button = document.createElement('button');
+            button.dataset.action = action;
+            if (cls) button.className = cls;
+            if (title) button.title = title;
+            button.textContent = label;
+            button.onclick = () => send(action, { id: d.id });
+            actions.append(button);
+          }
+          node.append(info, progress, actions); $('download-list').prepend(node); downloadNodes.set(d.id, node);
+        }
+        const nameNode = node.querySelector('.filename');
+        nameNode.textContent = d.path.split(/[\\/]/).pop() || 'Przygotowywanie pliku…';
+        nameNode.title = d.path || 'Pobieranie...';
+        if (d.state === 'completed' && d.path) {
+          nameNode.classList.add('clickable');
+          nameNode.title = 'Kliknij, aby otworzyć: ' + d.path;
+          nameNode.onclick = () => send('open_file', { id: d.id });
+        } else {
+          nameNode.classList.remove('clickable');
+          nameNode.onclick = null;
+        }
+
+        const detail = node.querySelector('.download-detail');
+        if (d.state === 'running') {
+          const parts = [];
+          if (d.speed > 0) parts.push(bytes(d.speed) + '/s');
+          if (d.total > 0) {
+            parts.push(`${bytes(d.received)} z ${bytes(d.total)}`);
+            if (d.speed > 0 && d.total > d.received) {
+              const rem = (d.total - d.received) / d.speed;
+              const t = formatTime(rem);
+              if (t) parts.push(`Pozostało: ${t}`);
+            }
+          } else {
+            parts.push(bytes(d.received) + ' pobrano');
+          }
+          detail.textContent = 'Pobieranie · ' + (parts.join(' — ') || 'Inicjalizacja…');
+        } else if (d.state === 'completed') {
+          detail.textContent = `Ukończono · ${bytes(d.total > 0 ? d.total : d.received)}`;
+        } else if (d.state === 'interrupted') {
+          detail.textContent = `Przerwano${d.reason ? ' (kod ' + d.reason + ')' : ''} · ${bytes(d.received)}`;
+        } else if (d.state === 'cancelled') {
+          detail.textContent = `Anulowano · ${bytes(d.received)}`;
+        } else {
+          detail.textContent = `${d.state} · ${bytes(d.received)}`;
+        }
+
+        const progress = node.querySelector('progress');
+        if (d.total > 0) progress.value = Math.min(100, (100 * d.received) / d.total);
+        else if (d.state === 'completed') progress.value = 100;
+        else if (d.state === 'running') progress.removeAttribute('value');
+        else progress.value = 0;
+
+        node.querySelector('[data-action=open_file]').hidden = d.state !== 'completed';
+        node.querySelector('[data-action=show_folder]').hidden = d.state !== 'completed' || !d.path;
+        node.querySelector('[data-action=pause]').hidden = d.state !== 'running';
+        node.querySelector('[data-action=resume]').hidden = d.state !== 'interrupted' || !d.resumable;
+        node.querySelector('[data-action=cancel]').hidden = d.state !== 'running' && !(d.state === 'interrupted' && d.resumable);
+        node.querySelector('[data-action=clear_download]').hidden = d.state === 'running' || (d.state === 'interrupted' && d.resumable);
+      }
+      $('downloads-clear').hidden = !items.some(d => d.state !== 'running');
+    }
+    window.render = s => {
+      state = s;
+      renderTabs(s);
+      const tab = s.tabs.find(t => t.id === s.active);
+      if (!tab) return;
+      if (document.activeElement !== $('address') || lastActive !== s.active) $('address').value = tab.home ? '' : tab.url;
+      if (lastActive !== s.active) $('search').value = '';
+      lastActive = s.active;
+      $('scheme').textContent = tab.home ? '' : tab.url.startsWith('https://') ? 'HTTPS' : 'HTTP';
+      $('back').disabled = !tab.back; $('forward').disabled = !tab.forward; $('reload').disabled = tab.home;
+      $('reload').textContent = tab.loading ? '×' : '↻'; $('reload').title = tab.loading ? 'Zatrzymaj' : 'Odśwież (Ctrl+R)';
+      $('reload').setAttribute('aria-label', tab.loading ? 'Zatrzymaj' : 'Odśwież');
+      $('block').setAttribute('aria-pressed', String(s.blocking)); $('awake').setAttribute('aria-pressed', String(tab.awake));
+      $('dashboard').hidden = !tab.home; $('dashboard').style.bottom = (s.downloadsOpen ? 248 : 28) + 'px';
+      $('downloads').hidden = !s.downloadsOpen; $('downloads-toggle').setAttribute('aria-expanded', String(s.downloadsOpen));
+      const hasActive = s.downloads.some(d => d.state === 'running');
+      $('downloads-toggle').classList.toggle('active-download', hasActive);
+      $('notice').textContent = s.notice || (tab.loading ? 'Ładowanie…' : 'Gotowy'); $('notice').title = s.notice || '';
+      $('stats').textContent = `${s.blocking ? 'Ochrona włączona' : 'Ochrona wyłączona'} · Zablokowano: ${s.blocked} · Uśpione: ${s.tabs.filter(t => t.sleeping).length}`;
+      renderDownloads(s.downloads);
+    };
+    send('ready');
+  </script>
+</body>
+
+</html>
