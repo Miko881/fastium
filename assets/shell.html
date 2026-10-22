@@ -554,6 +554,83 @@
       text-align: center
     }
 
+    #update-toast {
+      position: absolute;
+      bottom: 38px;
+      right: 18px;
+      background: #19212c;
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      padding: 11px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      animation: toastSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)
+    }
+
+    @keyframes toastSlideUp {
+      from { transform: translateY(16px); opacity: 0 }
+      to { transform: translateY(0); opacity: 1 }
+    }
+
+    .update-icon {
+      font-size: 24px;
+      line-height: 1
+    }
+
+    .update-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #fff
+    }
+
+    .update-desc {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px
+    }
+
+    .update-desc span {
+      color: var(--accent);
+      font-weight: 600
+    }
+
+    .update-buttons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 6px
+    }
+
+    .update-buttons button {
+      padding: 6px 12px;
+      font-size: 11px;
+      border-radius: 6px
+    }
+
+    .update-buttons button.btn-primary {
+      background: var(--accent);
+      color: #14251e;
+      font-weight: 600;
+      border: 1px solid var(--accent)
+    }
+
+    .update-buttons button.btn-primary:hover {
+      background: #bef3d8
+    }
+
+    .update-buttons #update-dismiss {
+      border: 1px solid #3b4652;
+      color: #cdd6df
+    }
+
+    .update-buttons #update-dismiss:hover {
+      background: #252e39;
+      color: #fff
+    }
+
     footer {
       position: absolute;
       bottom: 0;
@@ -688,6 +765,17 @@
     </div>
     <div id="download-list"></div>
   </section>
+  <aside id="update-toast" aria-label="Powiadomienie o aktualizacji" hidden>
+    <div class="update-icon" aria-hidden="true">🚀</div>
+    <div class="update-info">
+      <div class="update-title">Dostępna jest nowa wersja Fastium!</div>
+      <div class="update-desc">Wersja <span id="update-version"></span> jest gotowa do zainstalowania.</div>
+    </div>
+    <div class="update-buttons">
+      <button id="update-confirm" class="btn-primary">Aktualizuj teraz</button>
+      <button id="update-dismiss">Później</button>
+    </div>
+  </aside>
   <footer><span id="notice" role="status">Gotowy</span><span id="stats"><span class="dot">●</span> Fastium</span>
   </footer>
   <script>
@@ -701,6 +789,8 @@
     for (const id of ['downloads-toggle', 'downloads-close']) $(id).onclick = () => send('downloads');
     $('downloads-open-folder').onclick = () => send('open_downloads_folder');
     $('downloads-clear').onclick = () => send('clear_completed');
+    $('update-confirm').onclick = () => send('update_now');
+    $('update-dismiss').onclick = () => send('update_dismiss');
     $('win-min').onclick = () => send('window_minimize');
     $('win-max').onclick = () => send('window_maximize');
     $('win-close').onclick = () => send('window_close');
@@ -860,6 +950,12 @@
       $('notice').textContent = s.notice || (tab.loading ? 'Ładowanie…' : 'Gotowy'); $('notice').title = s.notice || '';
       $('stats').textContent = `${s.blocking ? 'Ochrona włączona' : 'Ochrona wyłączona'} · Zablokowano: ${s.blocked} · Uśpione: ${s.tabs.filter(t => t.sleeping).length}`;
       renderDownloads(s.downloads);
+      if (s.update) {
+        $('update-version').textContent = 'v' + s.update.version;
+        $('update-toast').hidden = false;
+      } else {
+        $('update-toast').hidden = true;
+      }
     };
     send('ready');
   </script>

@@ -30,6 +30,13 @@ impl Command {
     pub fn simple(action: &str) -> Self { Self { action: action.into(), id: 0, text: String::new() } }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub download_url: String,
+    pub html_url: String,
+}
+
 #[derive(Debug)]
 pub enum UserEvent {
     Command(Command),
@@ -42,6 +49,7 @@ pub enum UserEvent {
     DownloadStarted,
     Close,
     Favicon(u64, String),
+    UpdateFound(UpdateInfo),
 }
 
 struct Tab {
@@ -76,6 +84,7 @@ struct Browser {
     downloads_open: bool,
     ready: bool,
     notice: String,
+    update: Option<UpdateInfo>,
     next_tick: Instant,
     last_snapshot: String,
     browser_args: &'static str,
@@ -118,13 +127,15 @@ impl Browser {
         }
         let context = WebContext::new(Some(base.join("Profile")));
         let mut browser = Self {
-            tabs: Vec::new(), chrome, context, _chrome_context: chrome_context, window, proxy,
+            tabs: Vec::new(), chrome, context, _chrome_context: chrome_context, window, proxy: proxy.clone(),
             downloads: Rc::new(RefCell::new(Vec::new())), next_download: Rc::new(Cell::new(1)),
             blocking: Rc::new(Cell::new(true)), blocked: Rc::new(Cell::new(0)),
             active: 0, next_tab: 1, downloads_open: false, ready: false, notice: String::new(),
+            update: None,
             next_tick: Instant::now() + Duration::from_secs(2), last_snapshot: String::new(),
             browser_args,
         };
+        check_github_update(proxy);
         browser.new_tab(policy::HOME)?;
         let size = browser.window.inner_size();
         browser.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
@@ -318,6 +329,33 @@ impl Browser {
                 let mut list = self.downloads.borrow_mut();
                 list.retain(|d| d.operation.is_some());
             }
+            "update_dismiss" => {
+                self.update = None;
+            }
+            "update_now" => {
+                if let Some(update) = self.update.take() {
+                    self.notice = format!("Pobieranie instalatora Fastium v{}...", update.version);
+                    let proxy = self.proxy.clone();
+                    std::thread::spawn(move || {
+                        let temp_dir = std::env::temp_dir();
+                        let target_installer = temp_dir.join("FastiumSetup_Update.exe");
+                        let status = std::process::Command::new("curl.exe")
+                            .args(["-L", "-s", "-o", target_installer.to_str().unwrap_or(""), &update.download_url])
+                            .status();
+
+                        if let Ok(st) = status {
+                            if st.success() && target_installer.exists() {
+                                let _ = std::process::Command::new(&target_installer).spawn();
+                                let _ = proxy.send_event(UserEvent::Close);
+                                return;
+                            }
+                        }
+                        let _ = std::process::Command::new("explorer.exe")
+                            .arg(&update.html_url)
+                            .spawn();
+                    });
+                }
+            }
             "window_minimize" => { self.window.set_minimized(true); }
             "window_maximize" => { self.window.set_maximized(!self.window.is_maximized()); }
             "window_close" => { let _ = self.proxy.send_event(UserEvent::Close); }
@@ -389,6 +427,9 @@ impl Browser {
                     t.favicon = favicon;
                 }
             }
+            UserEvent::UpdateFound(info) => {
+                self.update = Some(info);
+            }
         }
         Ok(())
     }
@@ -432,7 +473,8 @@ impl Browser {
         })).collect();
         let snapshot = json!({ "tabs": tabs, "active": self.active,
             "blocking": self.blocking.get(), "blocked": self.blocked.get(),
-            "downloadsOpen": self.downloads_open, "downloads": *self.downloads.borrow(), "notice": self.notice }).to_string();
+            "downloadsOpen": self.downloads_open, "downloads": *self.downloads.borrow(),
+            "notice": self.notice, "update": self.update }).to_string();
         if snapshot != self.last_snapshot {
             // JSON serialization + textContent in shell: page titles/URLs never become HTML/JS.
             self.chrome.evaluate_script(&format!("window.render({snapshot})"))?;
@@ -485,4 +527,59 @@ pub fn run() -> Result<()> {
         if let Err(error) = browser.render() { eprintln!("Fastium UI: {error}"); }
     });
     Ok(())
+}
+
+fn is_newer_version(remote: &str, current: &str) -> bool {
+    let clean = |s: &str| -> Vec<u32> {
+        s.trim_start_matches(|c: char| c == 'v' || c == 'V')
+            .split('.')
+            .filter_map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+            .collect()
+    };
+    let r = clean(remote);
+    let c = clean(current);
+    for (rv, cv) in r.iter().zip(c.iter()) {
+        if rv > cv { return true; }
+        if rv < cv { return false; }
+    }
+    r.len() > c.len()
+}
+
+fn check_github_update(proxy: EventLoopProxy<UserEvent>) {
+    std::thread::spawn(move || {
+        // Opóźnienie 3 sekund, aby start przeglądarki był natychmiastowy i płynny
+        std::thread::sleep(Duration::from_secs(3));
+
+        let output = std::process::Command::new("curl.exe")
+            .args(["-s", "-H", "User-Agent: Fastium", "https://api.github.com/repos/Miko881/fastium/releases/latest"])
+            .output();
+
+        let Ok(output) = output else { return };
+        if !output.status.success() { return; }
+
+        let Ok(val) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { return };
+        let Some(tag) = val.get("tag_name").and_then(|t| t.as_str()) else { return };
+        let html_url = val.get("html_url").and_then(|u| u.as_str()).unwrap_or("https://github.com/Miko881/fastium/releases/latest").to_string();
+
+        let current_version = env!("CARGO_PKG_VERSION");
+        if is_newer_version(tag, current_version) {
+            let mut download_url = html_url.clone();
+            if let Some(assets) = val.get("assets").and_then(|a| a.as_array()) {
+                for asset in assets {
+                    let name = asset.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    if name.eq_ignore_ascii_case("FastiumSetup.exe") {
+                        if let Some(url) = asset.get("browser_download_url").and_then(|u| u.as_str()) {
+                            download_url = url.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = proxy.send_event(UserEvent::UpdateFound(UpdateInfo {
+                version: tag.trim_start_matches(|c| c == 'v' || c == 'V').to_string(),
+                download_url,
+                html_url,
+            }));
+        }
+    });
 }
