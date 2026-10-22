@@ -476,7 +476,8 @@ impl Browser {
         let snapshot = json!({ "tabs": tabs, "active": self.active,
             "blocking": self.blocking.get(), "blocked": self.blocked.get(),
             "downloadsOpen": self.downloads_open, "downloads": *self.downloads.borrow(),
-            "notice": self.notice, "update": self.update }).to_string();
+            "notice": self.notice, "update": self.update,
+            "version": env!("CARGO_PKG_VERSION") }).to_string();
         if snapshot != self.last_snapshot {
             // JSON serialization + textContent in shell: page titles/URLs never become HTML/JS.
             self.chrome.evaluate_script(&format!("window.render({snapshot})"))?;

@@ -776,7 +776,7 @@
       <button id="update-dismiss">Później</button>
     </div>
   </aside>
-  <footer><span id="notice" role="status">Gotowy</span><span id="stats"><span class="dot">●</span> Fastium</span>
+  <footer><span id="notice" role="status">Fastium</span><span id="stats"><span class="dot">●</span> Fastium</span>
   </footer>
   <script>
     'use strict';
@@ -947,7 +947,7 @@
       $('downloads').hidden = !s.downloadsOpen; $('downloads-toggle').setAttribute('aria-expanded', String(s.downloadsOpen));
       const hasActive = s.downloads.some(d => d.state === 'running');
       $('downloads-toggle').classList.toggle('active-download', hasActive);
-      $('notice').textContent = s.notice || (tab.loading ? 'Ładowanie…' : 'Gotowy'); $('notice').title = s.notice || '';
+      $('notice').textContent = s.notice || (tab.loading ? 'Ładowanie…' : ('Fastium v' + s.version)); $('notice').title = s.notice || ('Fastium v' + s.version);
       $('stats').textContent = `${s.blocking ? 'Ochrona włączona' : 'Ochrona wyłączona'} · Zablokowano: ${s.blocked} · Uśpione: ${s.tabs.filter(t => t.sleeping).length}`;
       renderDownloads(s.downloads);
       if (s.update) {
