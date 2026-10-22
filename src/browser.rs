@@ -1,4 +1,4 @@
-use std::{cell::{Cell, RefCell}, error::Error, path::PathBuf, rc::Rc, time::{Duration, Instant}};
+use std::{cell::{Cell, RefCell}, error::Error, os::windows::process::CommandExt, path::PathBuf, rc::Rc, time::{Duration, Instant}};
 use serde::Deserialize;
 use serde_json::json;
 use tao::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy}, window::{Window, WindowBuilder}};
@@ -8,6 +8,7 @@ use wry::{dpi::{LogicalPosition, LogicalSize}, MemoryUsageLevel, PageLoadEvent, 
 use crate::{native::{self, Downloads}, policy};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 const TOOLBAR: f64 = 100.0;
 const FOOTER: f64 = 28.0;
 const DOWNLOAD_PANEL: f64 = 220.0;
@@ -340,6 +341,7 @@ impl Browser {
                         let temp_dir = std::env::temp_dir();
                         let target_installer = temp_dir.join("FastiumSetup_Update.exe");
                         let status = std::process::Command::new("curl.exe")
+                            .creation_flags(CREATE_NO_WINDOW)
                             .args(["-L", "-s", "-o", target_installer.to_str().unwrap_or(""), &update.download_url])
                             .status();
 
@@ -551,6 +553,7 @@ fn check_github_update(proxy: EventLoopProxy<UserEvent>) {
         std::thread::sleep(Duration::from_secs(3));
 
         let output = std::process::Command::new("curl.exe")
+            .creation_flags(CREATE_NO_WINDOW)
             .args(["-s", "-H", "User-Agent: Fastium", "https://api.github.com/repos/Miko881/fastium/releases/latest"])
             .output();
 
