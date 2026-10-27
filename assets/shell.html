@@ -122,7 +122,22 @@
       flex: 1;
       border-radius: 8px;
       background: #191f28;
-      border: 1px solid transparent
+      border: 1px solid transparent;
+      user-select: none;
+      transition: transform 0.12s ease, opacity 0.12s ease, border-color 0.12s ease;
+    }
+
+    .tab.dragging {
+      opacity: 0.85;
+      cursor: grabbing !important;
+      z-index: 100;
+    }
+
+    .tab.detach-candidate {
+      opacity: 0.45;
+      transform: scale(0.94);
+      border-color: var(--accent);
+      box-shadow: 0 4px 16px rgba(111, 225, 166, 0.35);
     }
 
     .tab.active {
@@ -138,7 +153,9 @@
       flex: 1;
       text-align: left;
       height: 32px;
-      padding: 0 10px
+      padding: 0 10px;
+      touch-action: none;
+      cursor: pointer;
     }
 
     .tab-title {
@@ -819,12 +836,72 @@
         let node = tabNodes.get(tab.id);
         if (!node) {
           node = document.createElement('div'); node.className = 'tab';
+          node.dataset.id = tab.id;
           const select = document.createElement('button'); select.className = 'tab-select'; select.setAttribute('role', 'tab');
           const icon = document.createElement('span'); icon.className = 'tab-state'; icon.setAttribute('aria-hidden', 'true');
           const img = document.createElement('img'); img.className = 'tab-favicon'; img.alt = ''; img.hidden = true;
           img.onerror = () => { img.hidden = true; icon.hidden = false; };
           const title = document.createElement('span'); title.className = 'tab-title';
-          select.append(icon, img, title); select.onclick = () => send('switch', { id: tab.id });
+          select.append(icon, img, title);
+
+          select.onpointerdown = e => {
+            if (e.button !== 0) return;
+            const startX = e.clientX, startY = e.clientY;
+            let dragging = false;
+            const pointerId = e.pointerId;
+
+            const onPointerMove = me => {
+              if (!dragging) {
+                if (Math.hypot(me.clientX - startX, me.clientY - startY) > 6) {
+                  dragging = true;
+                  node.classList.add('dragging');
+                  try { select.setPointerCapture(pointerId); } catch (_) {}
+                }
+              }
+              if (dragging) {
+                const tabsRect = $('tabs').getBoundingClientRect();
+                const isOutside = me.clientY > tabsRect.bottom + 25 || me.clientY < tabsRect.top - 20 || me.clientX < tabsRect.left - 20 || me.clientX > tabsRect.right + 20;
+                node.classList.toggle('detach-candidate', isOutside);
+
+                if (!isOutside) {
+                  const elem = document.elementFromPoint(me.clientX, tabsRect.top + 10);
+                  const hoverTab = elem?.closest('.tab');
+                  if (hoverTab && hoverTab !== node && hoverTab.parentElement === $('tabs')) {
+                    const hoverRect = hoverTab.getBoundingClientRect();
+                    if (me.clientX > hoverRect.left + hoverRect.width / 2) {
+                      hoverTab.after(node);
+                    } else {
+                      hoverTab.before(node);
+                    }
+                  }
+                }
+              }
+            };
+
+            const onPointerUp = ue => {
+              select.removeEventListener('pointermove', onPointerMove);
+              select.removeEventListener('pointerup', onPointerUp);
+              select.removeEventListener('pointercancel', onPointerUp);
+              try { select.releasePointerCapture(pointerId); } catch (_) {}
+
+              if (dragging) {
+                const isDetach = node.classList.contains('detach-candidate');
+                node.classList.remove('dragging', 'detach-candidate');
+                if (isDetach) {
+                  send('detach_tab', { id: tab.id, x: Math.round(ue.screenX), y: Math.round(ue.screenY) });
+                } else {
+                  const order = Array.from($('tabs').children).map(c => c.dataset.id).filter(Boolean).join(',');
+                  send('reorder_tabs', { text: order });
+                }
+              } else {
+                send('switch', { id: tab.id });
+              }
+            };
+
+            select.addEventListener('pointermove', onPointerMove);
+            select.addEventListener('pointerup', onPointerUp);
+            select.addEventListener('pointercancel', onPointerUp);
+          };
           const close = document.createElement('button'); close.className = 'tab-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Zamknij kartę'); close.onclick = () => send('close', { id: tab.id });
           node.append(select, close); $('tabs').append(node); tabNodes.set(tab.id, node);
         }

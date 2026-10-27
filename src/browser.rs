@@ -19,16 +19,19 @@ const BROWSER_ARGS: &str = "";
 const FORCE_GPU_ARGS: &str = "--ignore-gpu-blocklist --enable-gpu-rasterization";
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Command {
     pub action: String,
     #[serde(default)]
     pub id: u64,
     #[serde(default)]
     pub text: String,
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
 }
 impl Command {
-    pub fn simple(action: &str) -> Self { Self { action: action.into(), id: 0, text: String::new() } }
+    pub fn simple(action: &str) -> Self { Self { action: action.into(), id: 0, text: String::new(), x: 0, y: 0 } }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -137,7 +140,11 @@ impl Browser {
             browser_args,
         };
         check_github_update(proxy);
-        browser.new_tab(policy::HOME)?;
+        let initial_url = std::env::args()
+            .skip(1)
+            .find(|arg| !arg.starts_with("--"))
+            .unwrap_or_else(|| policy::HOME.to_string());
+        browser.new_tab(&initial_url)?;
         let size = browser.window.inner_size();
         browser.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
         browser.window.set_inner_size(size);
@@ -361,6 +368,34 @@ impl Browser {
             "window_minimize" => { self.window.set_minimized(true); }
             "window_maximize" => { self.window.set_maximized(!self.window.is_maximized()); }
             "window_close" => { let _ = self.proxy.send_event(UserEvent::Close); }
+            "detach_tab" => {
+                if let Some(tab) = self.tabs.iter().find(|t| t.id == cmd.id) {
+                    let target_url = if tab.view.is_none() || tab.url == policy::HOME {
+                        policy::HOME.to_string()
+                    } else {
+                        tab.url.clone()
+                    };
+
+                    let current_exe = std::env::current_exe()?;
+                    let mut process_cmd = std::process::Command::new(current_exe);
+                    process_cmd.arg(&target_url);
+                    let spawn_x = cmd.x - 120;
+                    let spawn_y = (cmd.y - 18).max(0);
+                    process_cmd.arg(format!("--window-pos={},{}", spawn_x, spawn_y));
+                    if self.browser_args.contains("--ignore-gpu-blocklist") {
+                        process_cmd.arg("--force-gpu");
+                    }
+                    let _ = process_cmd.spawn();
+
+                    self.close_tab(cmd.id)?;
+                }
+            }
+            "reorder_tabs" => {
+                let ids: Vec<u64> = cmd.text.split(',').filter_map(|s| s.parse().ok()).collect();
+                if ids.len() == self.tabs.len() {
+                    self.tabs.sort_by_key(|t| ids.iter().position(|&id| id == t.id).unwrap_or(usize::MAX));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -496,6 +531,18 @@ impl Drop for Browser {
 }
 
 pub fn run() -> Result<()> {
+    let mut initial_pos = None;
+    for arg in std::env::args() {
+        if let Some(pos) = arg.strip_prefix("--window-pos=") {
+            let parts: Vec<&str> = pos.split(',').collect();
+            if parts.len() == 2 {
+                if let (Ok(x), Ok(y)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                    initial_pos = Some((x, y));
+                }
+            }
+        }
+    }
+
     let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let mut builder = WindowBuilder::new().with_title("Fastium")
         .with_decorations(false)
@@ -503,6 +550,9 @@ pub fn run() -> Result<()> {
         .with_visible(false)
         .with_inner_size(tao::dpi::LogicalSize::new(1180.0, 780.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 480.0));
+    if let Some((x, y)) = initial_pos {
+        builder = builder.with_position(tao::dpi::PhysicalPosition::new(x, y));
+    }
     if let Some(icon) = native::app_icon() {
         builder = builder.with_window_icon(Some(icon));
     }
