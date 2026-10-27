@@ -392,11 +392,16 @@ impl Browser {
             last_snapshot: String::new(),
         };
         win_state.activate(tab_id)?;
-        let size = win_state.window.inner_size();
-        win_state.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
-        win_state.window.set_inner_size(size);
-        win_state.resize()?;
         win_state.window.set_visible(true);
+        win_state.window.set_maximized(true);
+        unsafe {
+            use tao::platform::windows::WindowExtWindows;
+            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                windows::Win32::Foundation::HWND(win_state.window.hwnd() as _),
+                windows::Win32::UI::WindowsAndMessaging::SW_MAXIMIZE,
+            );
+        }
+        win_state.resize()?;
         Ok(win_state)
     }
 
@@ -508,9 +513,11 @@ impl Browser {
             "ready" => {
                 let win = &mut self.windows[win_idx];
                 win.ready = true;
-                let size = win.window.inner_size();
-                win.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
-                win.window.set_inner_size(size);
+                if !win.window.is_maximized() {
+                    let size = win.window.inner_size();
+                    win.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
+                    win.window.set_inner_size(size);
+                }
                 win.window.set_visible(true);
                 win.resize()?;
                 win.last_snapshot.clear();
@@ -695,13 +702,18 @@ impl Browser {
                 // 2. Karta jest jedyna w oknie: przesuń okno na docelowy monitor i zmaksymalizuj (tak jak Opera GX)
                 if self.windows[source_win_idx].tabs.len() <= 1 {
                     let win = &mut self.windows[source_win_idx];
-                    if win.window.is_maximized() {
-                        win.window.set_maximized(false);
-                    }
                     let spawn_x = target_x - 120;
                     let spawn_y = (target_y - 18).max(0);
+                    win.window.set_maximized(false);
                     win.window.set_outer_position(tao::dpi::PhysicalPosition::new(spawn_x, spawn_y));
                     win.window.set_maximized(true);
+                    unsafe {
+                        use tao::platform::windows::WindowExtWindows;
+                        let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                            windows::Win32::Foundation::HWND(win.window.hwnd() as _),
+                            windows::Win32::UI::WindowsAndMessaging::SW_MAXIMIZE,
+                        );
+                    }
                     let _ = win.resize();
                     return Ok(());
                 }
