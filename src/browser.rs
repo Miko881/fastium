@@ -342,11 +342,13 @@ impl Browser {
             .with_visible(false)
             .with_inner_size(tao::dpi::LogicalSize::new(1180.0, 780.0))
             .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 480.0))
-            .with_position(tao::dpi::PhysicalPosition::new(x, y));
+            .with_position(tao::dpi::PhysicalPosition::new(x, y))
+            .with_maximized(true);
         if let Some(icon) = native::app_icon() {
             builder = builder.with_window_icon(Some(icon));
         }
         let window = builder.build(target)?;
+        window.set_maximized(true);
         native::setup_window(&window);
 
         let win_id = window.id();
@@ -641,29 +643,16 @@ impl Browser {
                     }
                 };
 
-                // Karta jest jedyna w oknie: przesuń okno na docelowy monitor/pozycję bez przeładowywania i bez utraty stanu wideo
-                if self.windows[source_win_idx].tabs.len() <= 1 {
-                    let win = &mut self.windows[source_win_idx];
-                    if win.window.is_maximized() {
-                        win.window.set_maximized(false);
-                    }
-                    let spawn_x = target_x - 120;
-                    let spawn_y = (target_y - 18).max(0);
-                    win.window.set_outer_position(tao::dpi::PhysicalPosition::new(spawn_x, spawn_y));
-                    let _ = win.resize();
-                    return Ok(());
-                }
-
-                // Sprawdź czy karta została upuszczona na pasek innego otwartego okna Fastium
+                // 1. Sprawdź najpierw czy karta została upuszczona na inne otwarte okno Fastium (łączenie kart)
                 let mut dropped_on_other = None;
                 for (i, w) in self.windows.iter().enumerate() {
                     if i == source_win_idx { continue; }
                     if let Ok(pos) = w.window.outer_position() {
                         let size = w.window.inner_size();
-                        let rect_left = pos.x;
-                        let rect_right = pos.x + size.width as i32;
-                        let rect_top = pos.y;
-                        let rect_bottom = pos.y + 60;
+                        let rect_left = pos.x - 20;
+                        let rect_right = pos.x + size.width as i32 + 20;
+                        let rect_top = pos.y - 20;
+                        let rect_bottom = pos.y + size.height as i32 + 20;
                         if target_x >= rect_left && target_x <= rect_right && target_y >= rect_top && target_y <= rect_bottom {
                             dropped_on_other = Some(i);
                             break;
@@ -673,30 +662,58 @@ impl Browser {
 
                 if let Some(dest_idx) = dropped_on_other {
                     let tab = self.windows[source_win_idx].tabs.remove(tab_pos);
-                    if self.windows[source_win_idx].active == cmd.id {
-                        let next_id = self.windows[source_win_idx].tabs[tab_pos.min(self.windows[source_win_idx].tabs.len() - 1)].id;
-                        self.windows[source_win_idx].activate(next_id)?;
+                    let should_close_source = self.windows[source_win_idx].tabs.is_empty();
+
+                    let actual_dest_idx = if should_close_source && dest_idx > source_win_idx {
+                        dest_idx - 1
+                    } else {
+                        dest_idx
+                    };
+
+                    if should_close_source {
+                        self.windows.remove(source_win_idx);
+                    } else {
+                        if self.windows[source_win_idx].active == cmd.id {
+                            let next_id = self.windows[source_win_idx].tabs[tab_pos.min(self.windows[source_win_idx].tabs.len() - 1)].id;
+                            self.windows[source_win_idx].activate(next_id)?;
+                        }
+                        self.windows[source_win_idx].resize()?;
+                        self.windows[source_win_idx].last_snapshot.clear();
                     }
-                    self.windows[source_win_idx].resize()?;
 
                     if let Some(view) = &tab.view {
-                        native::reparent_view(view, &self.windows[dest_idx].window)?;
+                        native::reparent_view(view, &self.windows[actual_dest_idx].window)?;
                     }
                     let tab_id = tab.id;
-                    self.windows[dest_idx].tabs.push(tab);
-                    self.windows[dest_idx].activate(tab_id)?;
-                    self.windows[dest_idx].resize()?;
+                    self.windows[actual_dest_idx].tabs.push(tab);
+                    self.windows[actual_dest_idx].activate(tab_id)?;
+                    self.windows[actual_dest_idx].resize()?;
+                    self.windows[actual_dest_idx].last_snapshot.clear();
                     return Ok(());
                 }
 
-                // W oknie jest więcej kart: odrywamy kartę do nowego okna w tym samym procesie!
-                // Dzięki temu WebView jest przepinane natywnie, wideo i strona NIE są przeładowywane!
+                // 2. Karta jest jedyna w oknie: przesuń okno na docelowy monitor i zmaksymalizuj (tak jak Opera GX)
+                if self.windows[source_win_idx].tabs.len() <= 1 {
+                    let win = &mut self.windows[source_win_idx];
+                    if win.window.is_maximized() {
+                        win.window.set_maximized(false);
+                    }
+                    let spawn_x = target_x - 120;
+                    let spawn_y = (target_y - 18).max(0);
+                    win.window.set_outer_position(tao::dpi::PhysicalPosition::new(spawn_x, spawn_y));
+                    win.window.set_maximized(true);
+                    let _ = win.resize();
+                    return Ok(());
+                }
+
+                // 3. W oknie jest więcej kart: odrywamy kartę do nowego okna, maksymalizujemy je i przepinamy widok na żywo
                 let tab = self.windows[source_win_idx].tabs.remove(tab_pos);
                 if self.windows[source_win_idx].active == cmd.id {
                     let next_id = self.windows[source_win_idx].tabs[tab_pos.min(self.windows[source_win_idx].tabs.len() - 1)].id;
                     self.windows[source_win_idx].activate(next_id)?;
                 }
                 self.windows[source_win_idx].resize()?;
+                self.windows[source_win_idx].last_snapshot.clear();
 
                 let spawn_x = target_x - 120;
                 let spawn_y = (target_y - 18).max(0);
