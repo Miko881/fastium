@@ -331,7 +331,7 @@ pub fn shortcuts(view: &WebView, proxy: EventLoopProxy<UserEvent>) -> windows::c
             };
             args.SetHandled(true)?;
             // Defer mutations: WebView2 forbids reentrant controller calls here.
-            let _ = proxy.send_event(UserEvent::Command(Command::simple(action)));
+            let _ = proxy.send_event(UserEvent::Command(None, Command::simple(action)));
         }
         Ok(())
     }));
@@ -483,4 +483,26 @@ pub fn suspend(view: &WebView, id: u64, proxy: EventLoopProxy<UserEvent>) -> win
 pub fn resume(view: &WebView) -> windows::core::Result<()> {
     // SAFETY: live interface on its owning UI thread.
     unsafe { core(view)?.cast::<ICoreWebView2_3>()?.Resume() }
+}
+
+pub fn reparent_view(view: &WebView, new_window: &tao::window::Window) -> windows::core::Result<()> {
+    use tao::platform::windows::WindowExtWindows;
+    use windows::Win32::Foundation::HWND;
+    unsafe {
+        let hwnd = HWND(new_window.hwnd() as _);
+        view.controller().SetParentWindow(hwnd)?;
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn current_uri(view: &WebView) -> Option<String> {
+    unsafe {
+        let mut uri = PWSTR::null();
+        if core(view).ok()?.Source(&mut uri).is_ok() {
+            let s = take_pwstr(uri);
+            if !s.is_empty() { return Some(s); }
+        }
+    }
+    None
 }
