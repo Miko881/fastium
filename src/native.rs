@@ -487,10 +487,18 @@ pub fn resume(view: &WebView) -> windows::core::Result<()> {
 
 pub fn reparent_view(view: &WebView, new_window: &tao::window::Window) -> windows::core::Result<()> {
     use tao::platform::windows::WindowExtWindows;
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::SetParent,
+    };
     unsafe {
-        let hwnd = HWND(new_window.hwnd() as _);
-        view.controller().SetParentWindow(hwnd)?;
+        let new_parent = HWND(new_window.hwnd() as _);
+        let mut container_hwnd = HWND::default();
+        if view.controller().ParentWindow(&mut container_hwnd).is_ok() && !container_hwnd.0.is_null() {
+            let _ = SetParent(container_hwnd, new_parent);
+        } else {
+            view.controller().SetParentWindow(new_parent)?;
+        }
     }
     Ok(())
 }

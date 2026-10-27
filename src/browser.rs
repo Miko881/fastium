@@ -394,9 +394,7 @@ impl Browser {
         win_state.window.set_inner_size(tao::dpi::PhysicalSize::new(size.width + 1, size.height));
         win_state.window.set_inner_size(size);
         win_state.resize()?;
-        win_state.ready = true;
         win_state.window.set_visible(true);
-        let _ = win_state.render(&self.notice, &self.update, &self.downloads, self.blocking.get(), self.blocked.get());
         Ok(win_state)
     }
 
@@ -513,6 +511,7 @@ impl Browser {
                 win.window.set_inner_size(size);
                 win.window.set_visible(true);
                 win.resize()?;
+                win.last_snapshot.clear();
             }
             "new" => {
                 self.new_tab(win_idx, policy::HOME)?;
@@ -801,6 +800,7 @@ impl Browser {
                 win.ready = true;
                 win.window.set_visible(true);
                 let _ = win.resize();
+                win.last_snapshot.clear();
             }
         }
         let mut has_operations = false;
