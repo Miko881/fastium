@@ -281,9 +281,9 @@ pub fn app_icon() -> Option<tao::window::Icon> {
                     let sub_x = (x_f + (sx as f64 + 0.5) / 4.0) / scale;
                     let sub_y = (y_f + (sy as f64 + 0.5) / 4.0) / scale;
                     let unskew_x = sub_x - (sub_y - 31.0) * tan_skew;
-                    let in_vert = unskew_x >= 15.0 && unskew_x <= 29.0 && sub_y >= 5.0 && sub_y <= 57.0;
-                    let in_top = unskew_x >= 15.0 && unskew_x <= 48.0 && sub_y >= 5.0 && sub_y <= 18.0;
-                    let in_mid = unskew_x >= 15.0 && unskew_x <= 45.0 && sub_y >= 24.0 && sub_y <= 37.0;
+                    let in_vert = (15.0..=29.0).contains(&unskew_x) && (5.0..=57.0).contains(&sub_y);
+                    let in_top = (15.0..=48.0).contains(&unskew_x) && (5.0..=18.0).contains(&sub_y);
+                    let in_mid = (15.0..=45.0).contains(&unskew_x) && (24.0..=37.0).contains(&sub_y);
                     if in_vert || in_top || in_mid {
                         alpha_acc += 1.0;
                     }
@@ -292,7 +292,7 @@ pub fn app_icon() -> Option<tao::window::Icon> {
             let alpha = alpha_acc / 16.0;
             let idx = ((y * SIZE + x) * 4) as usize;
             if alpha > 0.0 {
-                rgba[idx + 0] = 159; // R
+                rgba[idx] = 159; // R
                 rgba[idx + 1] = 232; // G
                 rgba[idx + 2] = 195; // B
                 rgba[idx + 3] = (255.0 * alpha) as u8; // A
@@ -440,10 +440,8 @@ pub fn attach(
             if args.ResultFilePath(&mut path_pwstr).is_ok() {
                 initial_path = take_pwstr(path_pwstr);
             }
-            if initial_path.is_empty() {
-                if operation.ResultFilePath(&mut path_pwstr).is_ok() {
-                    initial_path = take_pwstr(path_pwstr);
-                }
+            if initial_path.is_empty() && operation.ResultFilePath(&mut path_pwstr).is_ok() {
+                initial_path = take_pwstr(path_pwstr);
             }
             let id = next_download.get();
             next_download.set(id + 1);

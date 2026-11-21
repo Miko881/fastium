@@ -799,8 +799,9 @@
     'use strict';
     const $ = id => document.getElementById(id);
     const send = (action, extra = {}) => window.ipc.postMessage(JSON.stringify({ action, ...extra }));
-    let state = null, lastTabs = '', lastActive = null;
+    let state = null, lastActive = null;
     const tabNodes = new Map(), downloadNodes = new Map();
+    const tabCache = new Map(), downloadCache = new Map();
     window.focusAddress = () => { $('address').focus(); $('address').select(); };
     for (const action of ['new', 'back', 'forward', 'home', 'block', 'awake']) $(action).onclick = () => send(action);
     for (const id of ['downloads-toggle', 'downloads-close']) $(id).onclick = () => send('downloads');
@@ -827,22 +828,41 @@
       return `${h} godz. ${m % 60} min`;
     }
     function renderTabs(s) {
-      const signature = JSON.stringify([s.tabs, s.active]);
-      if (signature === lastTabs) return;
-      lastTabs = signature;
       const ids = new Set(s.tabs.map(t => t.id));
-      for (const [id, node] of tabNodes) if (!ids.has(id)) { node.remove(); tabNodes.delete(id); }
-      for (const tab of s.tabs) {
+      for (const [id, node] of tabNodes) {
+        if (!ids.has(id)) {
+          node.remove();
+          tabNodes.delete(id);
+          tabCache.delete(id);
+        }
+      }
+      const tabsContainer = $('tabs');
+      for (let i = 0; i < s.tabs.length; i++) {
+        const tab = s.tabs[i];
         let node = tabNodes.get(tab.id);
+        const isActive = tab.id === s.active;
         if (!node) {
-          node = document.createElement('div'); node.className = 'tab';
+          node = document.createElement('div');
+          node.className = 'tab';
           node.dataset.id = tab.id;
-          const select = document.createElement('button'); select.className = 'tab-select'; select.setAttribute('role', 'tab');
-          const icon = document.createElement('span'); icon.className = 'tab-state'; icon.setAttribute('aria-hidden', 'true');
-          const img = document.createElement('img'); img.className = 'tab-favicon'; img.alt = ''; img.hidden = true;
-          img.onerror = () => { img.hidden = true; icon.hidden = false; };
-          const title = document.createElement('span'); title.className = 'tab-title';
-          select.append(icon, img, title);
+          const select = document.createElement('button');
+          select.className = 'tab-select';
+          select.setAttribute('role', 'tab');
+          const icon = document.createElement('span');
+          icon.className = 'tab-state';
+          icon.setAttribute('aria-hidden', 'true');
+          const title = document.createElement('span');
+          title.className = 'tab-title';
+          select.append(icon, title);
+
+          let wasDragging = false;
+          select.onclick = () => {
+            if (wasDragging) {
+              wasDragging = false;
+              return;
+            }
+            send('switch', { id: tab.id });
+          };
 
           select.onpointerdown = e => {
             if (e.button !== 0) return;
@@ -854,19 +874,20 @@
               if (!dragging) {
                 if (Math.hypot(me.clientX - startX, me.clientY - startY) > 6) {
                   dragging = true;
+                  wasDragging = true;
                   node.classList.add('dragging');
                   try { select.setPointerCapture(pointerId); } catch (_) {}
                 }
               }
               if (dragging) {
-                const tabsRect = $('tabs').getBoundingClientRect();
+                const tabsRect = tabsContainer.getBoundingClientRect();
                 const isOutside = me.clientY > tabsRect.bottom + 25 || me.clientY < tabsRect.top - 20 || me.clientX < tabsRect.left - 20 || me.clientX > tabsRect.right + 20;
                 node.classList.toggle('detach-candidate', isOutside);
 
                 if (!isOutside) {
                   const elem = document.elementFromPoint(me.clientX, tabsRect.top + 10);
                   const hoverTab = elem?.closest('.tab');
-                  if (hoverTab && hoverTab !== node && hoverTab.parentElement === $('tabs')) {
+                  if (hoverTab && hoverTab !== node && hoverTab.parentElement === tabsContainer) {
                     const hoverRect = hoverTab.getBoundingClientRect();
                     if (me.clientX > hoverRect.left + hoverRect.width / 2) {
                       hoverTab.after(node);
@@ -885,16 +906,15 @@
               try { select.releasePointerCapture(pointerId); } catch (_) {}
 
               if (dragging) {
+                setTimeout(() => { wasDragging = false; }, 50);
                 const isDetach = node.classList.contains('detach-candidate');
                 node.classList.remove('dragging', 'detach-candidate');
                 if (isDetach) {
                   send('detach_tab', { id: tab.id, x: Math.round(ue.screenX), y: Math.round(ue.screenY) });
                 } else {
-                  const order = Array.from($('tabs').children).map(c => c.dataset.id).filter(Boolean).join(',');
+                  const order = Array.from(tabsContainer.children).map(c => c.dataset.id).filter(Boolean).join(',');
                   send('reorder_tabs', { text: order });
                 }
-              } else {
-                send('switch', { id: tab.id });
               }
             };
 
@@ -902,41 +922,110 @@
             select.addEventListener('pointerup', onPointerUp);
             select.addEventListener('pointercancel', onPointerUp);
           };
-          const close = document.createElement('button'); close.className = 'tab-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Zamknij kartę'); close.onclick = () => send('close', { id: tab.id });
-          node.append(select, close); $('tabs').append(node); tabNodes.set(tab.id, node);
+
+          const close = document.createElement('button');
+          close.className = 'tab-close';
+          close.textContent = '×';
+          close.setAttribute('aria-label', 'Zamknij kartę');
+          close.onclick = () => send('close', { id: tab.id });
+          node.append(select, close);
+          tabsContainer.append(node);
+          tabNodes.set(tab.id, node);
         }
-        node.classList.toggle('active', tab.id === s.active);
-        node.children[0].setAttribute('aria-selected', String(tab.id === s.active));
-        node.children[0].title = tab.title + '\n' + tab.url;
-        node.querySelector('.tab-title').textContent = tab.title || tab.url;
-        const icon = node.querySelector('.tab-state');
-        const img = node.querySelector('.tab-favicon');
-        if (tab.favicon && !tab.home && !tab.loading && !tab.sleeping) {
-          if (img.src !== tab.favicon) img.src = tab.favicon;
-          img.hidden = false;
-          icon.hidden = true;
-        } else {
-          img.hidden = true;
-          icon.hidden = false;
-          icon.textContent = tab.sleeping ? 'z' : tab.loading ? '◌' : tab.home ? 'F' : '·';
+
+        if (tabsContainer.children[i] !== node) {
+          tabsContainer.insertBefore(node, tabsContainer.children[i] || null);
+        }
+
+        const prev = tabCache.get(tab.id);
+        const hasFavicon = Boolean(tab.favicon && !tab.home && !tab.loading && !tab.sleeping);
+        const stateChar = tab.sleeping ? 'z' : tab.loading ? '◌' : tab.home ? 'F' : '·';
+
+        if (!prev || prev.isActive !== isActive || prev.title !== tab.title || prev.url !== tab.url
+            || prev.favicon !== tab.favicon || prev.home !== tab.home || prev.loading !== tab.loading
+            || prev.sleeping !== tab.sleeping || prev.awake !== tab.awake) {
+
+          node.classList.toggle('active', isActive);
+          const select = node.children[0];
+          select.setAttribute('aria-selected', String(isActive));
+          select.title = (tab.title || '') + '\n' + (tab.url || '');
+          node.querySelector('.tab-title').textContent = tab.title || tab.url;
+
+          const icon = select.querySelector('.tab-state');
+          let img = select.querySelector('.tab-favicon');
+
+          if (hasFavicon) {
+            if (!img) {
+              img = document.createElement('img');
+              img.className = 'tab-favicon';
+              img.alt = '';
+              img.onerror = () => {
+                img.remove();
+                icon.hidden = false;
+              };
+              select.insertBefore(img, select.querySelector('.tab-title'));
+            }
+            if (img.src !== tab.favicon) img.src = tab.favicon;
+            img.hidden = false;
+            icon.hidden = true;
+          } else {
+            if (img) img.remove();
+            icon.hidden = false;
+            icon.textContent = stateChar;
+          }
+
+          tabCache.set(tab.id, {
+            isActive,
+            title: tab.title,
+            url: tab.url,
+            favicon: tab.favicon,
+            home: tab.home,
+            loading: tab.loading,
+            sleeping: tab.sleeping,
+            awake: tab.awake,
+          });
         }
       }
       if (lastActive !== s.active) tabNodes.get(s.active)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
     function renderDownloads(items) {
       const ids = new Set(items.map(d => d.id));
-      for (const [id, node] of downloadNodes) if (!ids.has(id)) { node.remove(); downloadNodes.delete(id); }
+      for (const [id, node] of downloadNodes) {
+        if (!ids.has(id)) {
+          node.remove();
+          downloadNodes.delete(id);
+          downloadCache.delete(id);
+        }
+      }
       let empty = $('download-empty');
-      if (!items.length && !empty) { empty = document.createElement('div'); empty.id = 'download-empty'; empty.className = 'empty'; empty.textContent = 'Pobrane pliki pojawią się tutaj.'; $('download-list').append(empty); }
-      if (items.length) empty?.remove();
+      if (!items.length) {
+        if (!empty) {
+          empty = document.createElement('div');
+          empty.id = 'download-empty';
+          empty.className = 'empty';
+          empty.textContent = 'Pobrane pliki pojawią się tutaj.';
+          $('download-list').append(empty);
+        }
+      } else if (empty) {
+        empty.remove();
+      }
+
       for (const d of items) {
         let node = downloadNodes.get(d.id);
         if (!node) {
-          node = document.createElement('article'); node.className = 'download';
-          const info = document.createElement('div'), name = document.createElement('div'), detail = document.createElement('div');
-          name.className = 'filename'; detail.className = 'download-detail'; info.append(name, detail);
-          const progress = document.createElement('progress'); progress.setAttribute('aria-label', 'Postęp pobierania'); progress.max = 100;
-          const actions = document.createElement('div'); actions.className = 'download-actions';
+          node = document.createElement('article');
+          node.className = 'download';
+          const info = document.createElement('div');
+          const name = document.createElement('div');
+          const detail = document.createElement('div');
+          name.className = 'filename';
+          detail.className = 'download-detail';
+          info.append(name, detail);
+          const progress = document.createElement('progress');
+          progress.setAttribute('aria-label', 'Postęp pobierania');
+          progress.max = 100;
+          const actions = document.createElement('div');
+          actions.className = 'download-actions';
           for (const [action, label, cls, title] of [
             ['open_file', 'Otwórz', 'btn-primary', 'Otwórz pobrany plik'],
             ['show_folder', 'W folderze', '', 'Pokaż plik w folderze pobranych'],
@@ -953,57 +1042,75 @@
             button.onclick = () => send(action, { id: d.id });
             actions.append(button);
           }
-          node.append(info, progress, actions); $('download-list').prepend(node); downloadNodes.set(d.id, node);
-        }
-        const nameNode = node.querySelector('.filename');
-        nameNode.textContent = d.path.split(/[\\/]/).pop() || 'Przygotowywanie pliku…';
-        nameNode.title = d.path || 'Pobieranie...';
-        if (d.state === 'completed' && d.path) {
-          nameNode.classList.add('clickable');
-          nameNode.title = 'Kliknij, aby otworzyć: ' + d.path;
-          nameNode.onclick = () => send('open_file', { id: d.id });
-        } else {
-          nameNode.classList.remove('clickable');
-          nameNode.onclick = null;
+          node.append(info, progress, actions);
+          $('download-list').prepend(node);
+          downloadNodes.set(d.id, node);
         }
 
-        const detail = node.querySelector('.download-detail');
-        if (d.state === 'running') {
-          const parts = [];
-          if (d.speed > 0) parts.push(bytes(d.speed) + '/s');
-          if (d.total > 0) {
-            parts.push(`${bytes(d.received)} z ${bytes(d.total)}`);
-            if (d.speed > 0 && d.total > d.received) {
-              const rem = (d.total - d.received) / d.speed;
-              const t = formatTime(rem);
-              if (t) parts.push(`Pozostało: ${t}`);
-            }
+        const prev = downloadCache.get(d.id);
+        if (!prev || prev.path !== d.path || prev.received !== d.received || prev.total !== d.total
+            || prev.speed !== d.speed || prev.state !== d.state || prev.resumable !== d.resumable || prev.reason !== d.reason) {
+
+          const nameNode = node.querySelector('.filename');
+          nameNode.textContent = d.path.split(/[\\/]/).pop() || 'Przygotowywanie pliku…';
+          nameNode.title = d.path || 'Pobieranie...';
+          if (d.state === 'completed' && d.path) {
+            nameNode.classList.add('clickable');
+            nameNode.title = 'Kliknij, aby otworzyć: ' + d.path;
+            nameNode.onclick = () => send('open_file', { id: d.id });
           } else {
-            parts.push(bytes(d.received) + ' pobrano');
+            nameNode.classList.remove('clickable');
+            nameNode.onclick = null;
           }
-          detail.textContent = 'Pobieranie · ' + (parts.join(' — ') || 'Inicjalizacja…');
-        } else if (d.state === 'completed') {
-          detail.textContent = `Ukończono · ${bytes(d.total > 0 ? d.total : d.received)}`;
-        } else if (d.state === 'interrupted') {
-          detail.textContent = `Przerwano${d.reason ? ' (kod ' + d.reason + ')' : ''} · ${bytes(d.received)}`;
-        } else if (d.state === 'cancelled') {
-          detail.textContent = `Anulowano · ${bytes(d.received)}`;
-        } else {
-          detail.textContent = `${d.state} · ${bytes(d.received)}`;
+
+          const detail = node.querySelector('.download-detail');
+          if (d.state === 'running') {
+            const parts = [];
+            if (d.speed > 0) parts.push(bytes(d.speed) + '/s');
+            if (d.total > 0) {
+              parts.push(`${bytes(d.received)} z ${bytes(d.total)}`);
+              if (d.speed > 0 && d.total > d.received) {
+                const rem = (d.total - d.received) / d.speed;
+                const t = formatTime(rem);
+                if (t) parts.push(`Pozostało: ${t}`);
+              }
+            } else {
+              parts.push(bytes(d.received) + ' pobrano');
+            }
+            detail.textContent = 'Pobieranie · ' + (parts.join(' — ') || 'Inicjalizacja…');
+          } else if (d.state === 'completed') {
+            detail.textContent = `Ukończono · ${bytes(d.total > 0 ? d.total : d.received)}`;
+          } else if (d.state === 'interrupted') {
+            detail.textContent = `Przerwano${d.reason ? ' (kod ' + d.reason + ')' : ''} · ${bytes(d.received)}`;
+          } else if (d.state === 'cancelled') {
+            detail.textContent = `Anulowano · ${bytes(d.received)}`;
+          } else {
+            detail.textContent = `${d.state} · ${bytes(d.received)}`;
+          }
+
+          const progress = node.querySelector('progress');
+          if (d.total > 0) progress.value = Math.min(100, (100 * d.received) / d.total);
+          else if (d.state === 'completed') progress.value = 100;
+          else if (d.state === 'running') progress.removeAttribute('value');
+          else progress.value = 0;
+
+          node.querySelector('[data-action=open_file]').hidden = d.state !== 'completed';
+          node.querySelector('[data-action=show_folder]').hidden = d.state !== 'completed' || !d.path;
+          node.querySelector('[data-action=pause]').hidden = d.state !== 'running';
+          node.querySelector('[data-action=resume]').hidden = d.state !== 'interrupted' || !d.resumable;
+          node.querySelector('[data-action=cancel]').hidden = d.state !== 'running' && !(d.state === 'interrupted' && d.resumable);
+          node.querySelector('[data-action=clear_download]').hidden = d.state === 'running' || (d.state === 'interrupted' && d.resumable);
+
+          downloadCache.set(d.id, {
+            path: d.path,
+            received: d.received,
+            total: d.total,
+            speed: d.speed,
+            state: d.state,
+            resumable: d.resumable,
+            reason: d.reason,
+          });
         }
-
-        const progress = node.querySelector('progress');
-        if (d.total > 0) progress.value = Math.min(100, (100 * d.received) / d.total);
-        else if (d.state === 'completed') progress.value = 100;
-        else if (d.state === 'running') progress.removeAttribute('value');
-        else progress.value = 0;
-
-        node.querySelector('[data-action=open_file]').hidden = d.state !== 'completed';
-        node.querySelector('[data-action=show_folder]').hidden = d.state !== 'completed' || !d.path;
-        node.querySelector('[data-action=pause]').hidden = d.state !== 'running';
-        node.querySelector('[data-action=resume]').hidden = d.state !== 'interrupted' || !d.resumable;
-        node.querySelector('[data-action=cancel]').hidden = d.state !== 'running' && !(d.state === 'interrupted' && d.resumable);
-        node.querySelector('[data-action=clear_download]').hidden = d.state === 'running' || (d.state === 'interrupted' && d.resumable);
       }
       $('downloads-clear').hidden = !items.some(d => d.state !== 'running');
     }

@@ -1,6 +1,6 @@
 ; Inno Setup Script for Fastium Browser
 #define MyAppName "Fastium"
-#define MyAppVersion "0.1.1"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "Fastium"
 #define MyAppExeName "fastium.exe"
 

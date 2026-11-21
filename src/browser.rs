@@ -69,6 +69,41 @@ struct Tab {
     keep_awake: bool,
 }
 
+struct TabSummary {
+    id: u64,
+    title: String,
+    url: String,
+    home: bool,
+    back: bool,
+    forward: bool,
+    loading: bool,
+    suspended: bool,
+    keep_awake: bool,
+    favicon: String,
+}
+
+struct DownloadSummary {
+    id: u64,
+    path: String,
+    received: i64,
+    total: i64,
+    speed: i64,
+    state: String,
+    resumable: bool,
+    reason: i32,
+}
+
+struct RenderSummary {
+    tabs: Vec<TabSummary>,
+    active: u64,
+    blocking: bool,
+    blocked: u64,
+    downloads_open: bool,
+    downloads: Vec<DownloadSummary>,
+    notice: String,
+    update_version: Option<String>,
+}
+
 struct WindowState {
     id: tao::window::WindowId,
     window: Window,
@@ -78,22 +113,34 @@ struct WindowState {
     downloads_open: bool,
     ready: bool,
     last_snapshot: String,
+    last_summary: Option<RenderSummary>,
 }
 
 impl WindowState {
+    fn clear_cache(&mut self) {
+        self.last_snapshot.clear();
+        self.last_summary = None;
+    }
+
+    fn content_bounds(&self) -> Rect {
+        let size = self.window.inner_size().to_logical::<f64>(self.window.scale_factor());
+        let bottom = FOOTER + if self.downloads_open { DOWNLOAD_PANEL } else { 0.0 };
+        Rect {
+            position: LogicalPosition::new(0.0, TOOLBAR).into(),
+            size: LogicalSize::new(size.width.max(1.0), (size.height - TOOLBAR - bottom).max(1.0)).into(),
+        }
+    }
+
     fn resize(&self) -> Result<()> {
         let size = self.window.inner_size().to_logical::<f64>(self.window.scale_factor());
         self.chrome.set_bounds(Rect {
             position: LogicalPosition::new(0.0, 0.0).into(),
             size: LogicalSize::new(size.width.max(1.0), size.height.max(1.0)).into(),
         })?;
-        let bottom = FOOTER + if self.downloads_open { DOWNLOAD_PANEL } else { 0.0 };
+        let bounds = self.content_bounds();
         for tab in &self.tabs {
             if let Some(view) = &tab.view {
-                view.set_bounds(Rect {
-                    position: LogicalPosition::new(0.0, TOOLBAR).into(),
-                    size: LogicalSize::new(size.width.max(1.0), (size.height - TOOLBAR - bottom).max(1.0)).into(),
-                })?;
+                view.set_bounds(bounds)?;
             }
         }
         Ok(())
@@ -101,11 +148,13 @@ impl WindowState {
 
     fn activate(&mut self, id: u64) -> Result<()> {
         if !self.tabs.iter().any(|t| t.id == id) { return Ok(()); }
+        let bounds = self.content_bounds();
         for tab in &mut self.tabs {
             if tab.id == id {
                 if let Some(view) = &tab.view {
                     native::resume(view)?;
                     view.set_memory_usage_level(MemoryUsageLevel::Normal)?;
+                    view.set_bounds(bounds)?;
                     view.set_visible(true)?;
                     view.focus()?;
                 } else {
@@ -122,7 +171,6 @@ impl WindowState {
             }
         }
         self.active = id;
-        self.resize()?;
         Ok(())
     }
 
@@ -130,6 +178,60 @@ impl WindowState {
         self.chrome.focus()?;
         self.chrome.evaluate_script("window.focusAddress()")?;
         Ok(())
+    }
+
+    fn is_state_dirty(
+        &self,
+        prev: &RenderSummary,
+        notice: &str,
+        update: &Option<UpdateInfo>,
+        downloads: &[crate::native::Download],
+        blocking: bool,
+        blocked: u64,
+    ) -> bool {
+        if self.active != prev.active
+            || self.downloads_open != prev.downloads_open
+            || blocking != prev.blocking
+            || blocked != prev.blocked
+            || notice != prev.notice
+            || update.as_ref().map(|u| u.version.as_str()) != prev.update_version.as_deref()
+            || self.tabs.len() != prev.tabs.len()
+            || downloads.len() != prev.downloads.len()
+        {
+            return true;
+        }
+
+        for (t, pt) in self.tabs.iter().zip(prev.tabs.iter()) {
+            if t.id != pt.id
+                || t.title != pt.title
+                || t.url != pt.url
+                || t.view.is_none() != pt.home
+                || t.back != pt.back
+                || t.forward != pt.forward
+                || t.loading != pt.loading
+                || t.suspended != pt.suspended
+                || t.keep_awake != pt.keep_awake
+                || t.favicon != pt.favicon
+            {
+                return true;
+            }
+        }
+
+        for (d, pd) in downloads.iter().zip(prev.downloads.iter()) {
+            if d.id != pd.id
+                || d.received != pd.received
+                || d.total != pd.total
+                || d.speed != pd.speed
+                || d.resumable != pd.resumable
+                || d.reason != pd.reason
+                || d.state != pd.state
+                || d.path != pd.path
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn render(
@@ -141,6 +243,13 @@ impl WindowState {
         blocked: u64,
     ) -> Result<()> {
         if !self.ready { return Ok(()); }
+        let dls = downloads.borrow();
+        if let Some(prev) = &self.last_summary {
+            if !self.is_state_dirty(prev, notice, update, &dls, blocking, blocked) {
+                return Ok(());
+            }
+        }
+
         let tabs: Vec<_> = self.tabs.iter().map(|t| json!({
             "id": t.id, "title": t.title, "url": t.url, "home": t.view.is_none(),
             "back": t.back, "forward": t.forward, "loading": t.loading,
@@ -153,7 +262,7 @@ impl WindowState {
             "blocking": blocking,
             "blocked": blocked,
             "downloadsOpen": self.downloads_open,
-            "downloads": *downloads.borrow(),
+            "downloads": *dls,
             "notice": notice,
             "update": update,
             "version": env!("CARGO_PKG_VERSION"),
@@ -162,6 +271,36 @@ impl WindowState {
             self.chrome.evaluate_script(&format!("window.render({snapshot})"))?;
             self.last_snapshot = snapshot;
         }
+        self.last_summary = Some(RenderSummary {
+            tabs: self.tabs.iter().map(|t| TabSummary {
+                id: t.id,
+                title: t.title.clone(),
+                url: t.url.clone(),
+                home: t.view.is_none(),
+                back: t.back,
+                forward: t.forward,
+                loading: t.loading,
+                suspended: t.suspended,
+                keep_awake: t.keep_awake,
+                favicon: t.favicon.clone(),
+            }).collect(),
+            active: self.active,
+            blocking,
+            blocked,
+            downloads_open: self.downloads_open,
+            downloads: dls.iter().map(|d| DownloadSummary {
+                id: d.id,
+                path: d.path.clone(),
+                received: d.received,
+                total: d.total,
+                speed: d.speed,
+                state: d.state.clone(),
+                resumable: d.resumable,
+                reason: d.reason,
+            }).collect(),
+            notice: notice.to_string(),
+            update_version: update.as_ref().map(|u| u.version.clone()),
+        });
         Ok(())
     }
 }
@@ -281,6 +420,7 @@ impl Browser {
             downloads_open: false,
             ready: false,
             last_snapshot: String::new(),
+            last_summary: None,
         };
         win_state.activate(initial_tab_id)?;
         let size = win_state.window.inner_size();
@@ -390,6 +530,7 @@ impl Browser {
             downloads_open: false,
             ready: false,
             last_snapshot: String::new(),
+            last_summary: None,
         };
         win_state.activate(tab_id)?;
         win_state.window.set_visible(true);
@@ -451,8 +592,9 @@ impl Browser {
         self.windows[win_idx].tabs[i].url = url.clone();
         self.windows[win_idx].tabs[i].loading = true;
         self.windows[win_idx].tabs[i].title = "Ładowanie…".into();
-        self.windows[win_idx].resize()?;
+        let bounds = self.windows[win_idx].content_bounds();
         if let Some(view) = &self.windows[win_idx].tabs[i].view {
+            view.set_bounds(bounds)?;
             native::resume(view)?;
             view.set_visible(true)?;
             view.load_url(&url)?;
@@ -470,8 +612,10 @@ impl Browser {
         if self.has_download(id) {
             return Err("Ta karta pobiera plik. Zakończ lub anuluj pobieranie przed jej zamknięciem.".into());
         }
+        if win_idx >= self.windows.len() { return Ok(()); }
         let Some(i) = self.windows[win_idx].tabs.iter().position(|t| t.id == id) else { return Ok(()) };
         self.windows[win_idx].tabs.remove(i);
+        self.windows[win_idx].clear_cache();
         if self.windows[win_idx].tabs.is_empty() {
             if self.windows.len() > 1 {
                 self.windows.remove(win_idx);
@@ -508,6 +652,11 @@ impl Browser {
             let fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
             self.windows.iter().position(|w| windows::Win32::Foundation::HWND(w.window.hwnd() as _) == fg).unwrap_or(0)
         };
+        let target_win_idx = if cmd.id != 0 {
+            self.windows.iter().position(|w| w.tabs.iter().any(|t| t.id == cmd.id)).unwrap_or(win_idx)
+        } else {
+            win_idx
+        };
 
         match cmd.action.as_str() {
             "ready" => {
@@ -520,7 +669,7 @@ impl Browser {
                 }
                 win.window.set_visible(true);
                 win.resize()?;
-                win.last_snapshot.clear();
+                win.clear_cache();
             }
             "new" => {
                 self.new_tab(win_idx, policy::HOME)?;
@@ -528,8 +677,8 @@ impl Browser {
             }
             "navigate" => self.navigate(win_idx, &cmd.text)?,
             "home" => self.navigate(win_idx, policy::HOME)?,
-            "switch" => self.windows[win_idx].activate(cmd.id)?,
-            "close" => self.close_tab(win_idx, cmd.id)?,
+            "switch" => self.windows[target_win_idx].activate(cmd.id)?,
+            "close" => self.close_tab(target_win_idx, cmd.id)?,
             "close_active" => {
                 let active = self.windows[win_idx].active;
                 self.close_tab(win_idx, active)?;
@@ -684,8 +833,7 @@ impl Browser {
                             let next_id = self.windows[source_win_idx].tabs[tab_pos.min(self.windows[source_win_idx].tabs.len() - 1)].id;
                             self.windows[source_win_idx].activate(next_id)?;
                         }
-                        self.windows[source_win_idx].resize()?;
-                        self.windows[source_win_idx].last_snapshot.clear();
+                        self.windows[source_win_idx].clear_cache();
                     }
 
                     if let Some(view) = &tab.view {
@@ -694,8 +842,7 @@ impl Browser {
                     let tab_id = tab.id;
                     self.windows[actual_dest_idx].tabs.push(tab);
                     self.windows[actual_dest_idx].activate(tab_id)?;
-                    self.windows[actual_dest_idx].resize()?;
-                    self.windows[actual_dest_idx].last_snapshot.clear();
+                    self.windows[actual_dest_idx].clear_cache();
                     return Ok(());
                 }
 
@@ -724,8 +871,7 @@ impl Browser {
                     let next_id = self.windows[source_win_idx].tabs[tab_pos.min(self.windows[source_win_idx].tabs.len() - 1)].id;
                     self.windows[source_win_idx].activate(next_id)?;
                 }
-                self.windows[source_win_idx].resize()?;
-                self.windows[source_win_idx].last_snapshot.clear();
+                self.windows[source_win_idx].clear_cache();
 
                 let spawn_x = target_x - 120;
                 let spawn_y = (target_y - 18).max(0);
@@ -829,7 +975,7 @@ impl Browser {
                 win.ready = true;
                 win.window.set_visible(true);
                 let _ = win.resize();
-                win.last_snapshot.clear();
+                win.clear_cache();
             }
         }
         let mut has_operations = false;
@@ -927,7 +1073,7 @@ pub fn run() -> Result<()> {
 
 fn is_newer_version(remote: &str, current: &str) -> bool {
     let clean = |s: &str| -> Vec<u32> {
-        s.trim_start_matches(|c: char| c == 'v' || c == 'V')
+        s.trim_start_matches(['v', 'V'])
             .split('.')
             .filter_map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
             .collect()
@@ -973,7 +1119,7 @@ fn check_github_update(proxy: EventLoopProxy<UserEvent>) {
                                 }
                                 let _ = proxy.send_event(UserEvent::Command(None, Command::simple("update_found")));
                                 let _ = proxy.send_event(UserEvent::UpdateFound(UpdateInfo {
-                                    version: tag.trim_start_matches(|c| c == 'v' || c == 'V').to_string(),
+                                    version: tag.trim_start_matches(['v', 'V']).to_string(),
                                     download_url,
                                     html_url,
                                 }));

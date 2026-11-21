@@ -1,7 +1,70 @@
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::sync::OnceLock;
 use url::Url;
 
 pub const HOME: &str = "fastium://newtab";
 pub const BLOCKED_HOSTS: &str = include_str!("../assets/blocklist.txt");
+
+static BLOCKED_RULES: OnceLock<HashSet<String>> = OnceLock::new();
+
+fn blocked_rules() -> &'static HashSet<String> {
+    BLOCKED_RULES.get_or_init(|| {
+        BLOCKED_HOSTS
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.starts_with('#'))
+            .map(|s| s.trim_end_matches('.').to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+}
+
+/// Fast host extraction from a URL string without full URL parsing.
+/// Extracts the host portion (handling scheme, userinfo, port, IPv6) and trims trailing dot.
+pub fn extract_host(url: &str) -> Option<&str> {
+    let scheme_end = url.find("://")?;
+    let scheme = &url[..scheme_end];
+    if scheme.is_empty()
+        || !scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.')
+    {
+        return None;
+    }
+
+    let rest = &url[scheme_end + 3..];
+    let auth_end = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..auth_end];
+    if authority.is_empty() {
+        return None;
+    }
+
+    let without_user = match authority.rfind('@') {
+        Some(pos) => &authority[pos + 1..],
+        None => authority,
+    };
+    if without_user.is_empty() {
+        return None;
+    }
+
+    let host = if without_user.starts_with('[') {
+        let close = without_user.find(']')?;
+        &without_user[..=close]
+    } else {
+        match without_user.find(':') {
+            Some(pos) => &without_user[..pos],
+            None => without_user,
+        }
+    };
+
+    let host = host.trim_end_matches('.');
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
 
 /// Only web URLs enter content views. Credentials and privileged/local schemes are rejected.
 pub fn web_url(input: &str) -> Option<String> {
@@ -47,11 +110,30 @@ pub fn resolve(input: &str) -> Result<String, &'static str> {
 }
 
 pub fn blocked(url: &str) -> bool {
-    let Ok(url) = Url::parse(url) else { return false };
-    let Some(host) = url.host_str() else { return false };
-    let host = host.trim_end_matches('.');
-    BLOCKED_HOSTS.lines().map(str::trim).filter(|s| !s.is_empty() && !s.starts_with('#'))
-        .any(|rule| host == rule || host.strip_suffix(rule).is_some_and(|prefix| prefix.ends_with('.')))
+    let Some(raw_host) = extract_host(url) else {
+        return false;
+    };
+
+    let host: Cow<str> = if raw_host.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(raw_host.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(raw_host)
+    };
+
+    let rules = blocked_rules();
+    if rules.contains(host.as_ref()) {
+        return true;
+    }
+
+    let mut remainder = host.as_ref();
+    while let Some(dot_idx) = remainder.find('.') {
+        remainder = &remainder[dot_idx + 1..];
+        if !remainder.is_empty() && rules.contains(remainder) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -84,6 +166,42 @@ mod tests {
         assert!(!blocked("https://notdoubleclick.net/"));
         assert!(!blocked("https://doubleclick.net.example.org/"));
         assert!(!blocked("https://example.org/?ad=doubleclick.net"));
+    }
+    #[test]
+    fn blocked_edge_cases() {
+        // Uppercase, mixed case, trailing dot
+        assert!(blocked("https://DOUBLECLICK.NET/ad.js"));
+        assert!(blocked("https://DoubleClick.Net./ad.js"));
+        assert!(blocked("https://ADS.DOUBLECLICK.NET./ad.js"));
+        assert!(blocked("http://Ads.DoubleClick.Net:8080/ad.js"));
+
+        // Subdomain depth
+        assert!(blocked("https://a.b.c.doubleclick.net/test"));
+        assert!(blocked("https://deep.sub.googleadservices.com/page"));
+
+        // Exact rule vs non-matching suffixes
+        assert!(!blocked("https://notdoubleclick.net/"));
+        assert!(!blocked("https://mydoubleclick.net/"));
+        assert!(!blocked("https://doubleclick.net.example.org/"));
+
+        // Query string, path, or fragment containing blocked domain must NOT trigger false positive
+        assert!(!blocked("https://example.org/?redirect=doubleclick.net"));
+        assert!(!blocked("https://example.org/path/doubleclick.net"));
+        assert!(!blocked("https://example.org#doubleclick.net"));
+        assert!(!blocked("https://example.com/search?q=https://doubleclick.net/"));
+
+        // Ports and userinfo
+        assert!(blocked("https://user:pass@doubleclick.net:8443/ad"));
+        assert!(blocked("https://user@ads.doubleclick.net:443/"));
+
+        // No host or non-web schemes
+        assert!(!blocked(""));
+        assert!(!blocked("https:///path"));
+        assert!(!blocked("javascript:alert('doubleclick.net')"));
+        assert!(!blocked("data:text/html,doubleclick.net"));
+        assert!(!blocked("about:blank"));
+        assert!(!blocked("fastium://newtab"));
+        assert!(!blocked("http://[::1]:8080/doubleclick.net"));
     }
 }
 
